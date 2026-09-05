@@ -60,7 +60,7 @@ class AppConfig {
   static const bool allowVideoUploadOnWeb = false;
 
   /// من لوحة Supabase: Project Settings → Data API → Project URL
-  static const String supabaseUrl = 'https://ضع_معرّف_مشروعك.supabase.co';
+  static const String supabaseUrl = 'https://rzkqegziflgbczhpgdbn.supabase.co';
   static const String supabaseBucket = 'media';
 
   // ===== حدود =====

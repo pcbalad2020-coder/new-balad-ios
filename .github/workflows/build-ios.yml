@@ -9,11 +9,16 @@ on:
 jobs:
   build-ios:
     name: Build unsigned IPA
-    runs-on: macos-14       # لا بد من نظام macOS لبناء iOS
+    runs-on: macos-15       # لا بد من نظام macOS لبناء iOS (نسخة 15 فيها Xcode 16)
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
