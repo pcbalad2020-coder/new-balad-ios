@@ -1,0 +1,66 @@
+name: Build iOS IPA
+
+# متى يعمل هذا الـ workflow
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:        # زر تشغيل يدوي من تبويب Actions
+
+jobs:
+  build-ios:
+    name: Build unsigned IPA
+    runs-on: macos-14       # لا بد من نظام macOS لبناء iOS
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.5'
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # ملف Firebase لنظام iOS غير مرفوع للمستودع (محمي في .gitignore).
+      # إن أضفته لاحقاً كسر (secret) بصيغة base64 فعّل الخطوة التالية:
+      # - name: Restore GoogleService-Info.plist
+      #   run: echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode > ios/Runner/GoogleService-Info.plist
+      #   env:
+      #     GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}
+
+      - name: Build iOS (no code signing)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          set -e
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/Runner.app
+          zip -r -y app-unsigned.ipa Payload > /dev/null
+          cd -
+          mkdir -p artifacts
+          mv build/ios/iphoneos/app-unsigned.ipa artifacts/balad_naw-unsigned.ipa
+          ls -lh artifacts
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: balad_naw-unsigned-ipa
+          path: artifacts/balad_naw-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      # نشر تلقائي كـ Release عند دفع وسم بصيغة v* (مثال: git tag v1.0.0 && git push --tags)
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/balad_naw-unsigned.ipa

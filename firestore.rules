@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // الأدمن = من له مستند باسم uid داخل مجموعة admins
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // قائمة المدراء: تُضاف يدوياً من كونسول Firebase فقط
+    match /admins/{uid} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+
+      // الأدمن يعدّل كل شيء، والزائر لا يغيّر سوى عدّادي الإعجاب والتعليق
+      allow update: if isAdmin() ||
+        (isSignedIn() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['likesCount', 'commentsCount']));
+
+      match /likes/{uid} {
+        allow read: if true;
+        allow create, delete: if isSignedIn() && request.auth.uid == uid;
+        allow update: if false;
+      }
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500;
+        allow delete: if isAdmin() ||
+          (isSignedIn() && resource.data.uid == request.auth.uid);
+        allow update: if false;
+      }
+    }
+  }
+}

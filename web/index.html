@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="أخبار منطقتك أولاً بأول">
+  <meta name="theme-color" content="#0B63CE">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="أخبار بلد">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>أخبار بلد</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #ffffff; }
+
+    #boot {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      background: linear-gradient(180deg, #ffffff 0%, #e8f1fd 100%);
+      font-family: system-ui, "Segoe UI", Tahoma, sans-serif;
+      transition: opacity .4s ease;
+    }
+    #boot.hidden { opacity: 0; pointer-events: none; }
+
+    #boot .mark {
+      width: 92px; height: 92px;
+      border-radius: 26px;
+      background: linear-gradient(135deg, #0B63CE, #084A9C);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 46px;
+      box-shadow: 0 12px 34px rgba(11, 99, 206, .22);
+    }
+    #boot h1 { margin: 0; font-size: 25px; color: #102039; font-weight: 800; }
+    #boot p  { margin: 0; font-size: 14px; color: #6C7B90; }
+
+    #boot .bar {
+      width: 120px; height: 3px; border-radius: 3px;
+      background: #d7e5f8; overflow: hidden;
+    }
+    #boot .bar span {
+      display: block; width: 40%; height: 100%;
+      background: #0B63CE; border-radius: 3px;
+      animation: slide 1.1s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0%   { transform: translateX(160%); }
+      100% { transform: translateX(-160%); }
+    }
+  </style>
+</head>
+<body>
+  <div id="boot">
+    <div class="mark">📢</div>
+    <h1>أخبار بلد</h1>
+    <p>أخبار منطقتك أولاً بأول</p>
+    <div class="bar"><span></span></div>
+  </div>
+
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var boot = document.getElementById('boot');
+      if (!boot) return;
+      boot.classList.add('hidden');
+      setTimeout(function () { boot.remove(); }, 450);
+    });
+  </script>
+
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

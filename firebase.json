@@ -1,0 +1,39 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "balad-news",
+          "appId": "1:265254202905:android:a75c2bde6383d66e45c488",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "balad-news",
+          "configurations": {
+            "android": "1:265254202905:android:a75c2bde6383d66e45c488",
+            "ios": "1:265254202905:ios:7af8f44f5582644e45c488",
+            "macos": "1:265254202905:ios:7af8f44f5582644e45c488",
+            "web": "1:265254202905:web:f9b3539b1213702745c488",
+            "windows": "1:265254202905:web:e5681a429244f25445c488"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
