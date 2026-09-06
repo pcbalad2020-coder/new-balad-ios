@@ -1426,69 +1426,79 @@ class _HomePageState extends State<HomePage> {
       stream: Api.isAdminStream(),
       builder: (context, adminSnap) {
         final isAdmin = adminSnap.data ?? false;
+        final showHome = _navIndex == 0 || _navIndex == 3;
 
         return Scaffold(
-          appBar: AppBar(
-            titleSpacing: 16,
-            title: _searching
-                ? TextField(
-                    controller: _searchController,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      hintText: 'ابحث في الأخبار',
-                      filled: false,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    onChanged: (v) => setState(() => _search = v.trim()),
-                  )
-                : Row(
-                    children: [
-                      const AppLogo(size: 34),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Text(AppConfig.appName,
-                              style: TextStyle(
-                                  fontSize: 17, fontWeight: FontWeight.w800)),
-                          Text(AppConfig.tagline,
-                              style: TextStyle(
-                                  fontSize: 11, color: AppConfig.textSoft)),
-                        ],
-                      ),
-                    ],
-                  ),
-            actions: [
-              IconButton(
-                tooltip: _searching ? 'إغلاق البحث' : 'بحث',
-                icon: Icon(
-                    _searching ? Icons.close_rounded : Icons.search_rounded),
-                onPressed: () => setState(() {
-                  _searching = !_searching;
-                  _search = '';
-                  _searchController.clear();
-                }),
-              ),
-              const SizedBox(width: 4),
-            ],
-            bottom: _searching
-                ? null
-                : PreferredSize(
-                    preferredSize: const Size.fromHeight(52),
-                    child: _CategoryBar(
-                      selected: _category,
-                      onSelect: (c) => setState(() {
-                        _category = c;
-                        _limit = AppConfig.pageSize;
+          appBar: showHome
+              ? AppBar(
+                  titleSpacing: 16,
+                  title: _searching
+                      ? TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            hintText: 'ابحث في الأخبار',
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          onChanged: (v) => setState(() => _search = v.trim()),
+                        )
+                      : Row(
+                          children: [
+                            const AppLogo(size: 34),
+                            const SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text(AppConfig.appName,
+                                    style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w800)),
+                                Text(AppConfig.tagline,
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppConfig.textSoft)),
+                              ],
+                            ),
+                          ],
+                        ),
+                  actions: [
+                    IconButton(
+                      tooltip: _searching ? 'إغلاق البحث' : 'بحث',
+                      icon: Icon(_searching
+                          ? Icons.close_rounded
+                          : Icons.search_rounded),
+                      onPressed: () => setState(() {
+                        _searching = !_searching;
+                        _search = '';
+                        _searchController.clear();
                       }),
                     ),
-                  ),
-          ),
-          body: _buildFeed(isAdmin),
+                    const SizedBox(width: 4),
+                  ],
+                  bottom: _searching
+                      ? null
+                      : PreferredSize(
+                          preferredSize: const Size.fromHeight(52),
+                          child: _CategoryBar(
+                            selected: _category,
+                            onSelect: (c) => setState(() {
+                              _category = c;
+                              _limit = AppConfig.pageSize;
+                            }),
+                          ),
+                        ),
+                )
+              : null,
+          body: showHome
+              ? _buildFeed(isAdmin)
+              : _navIndex == 1
+                  ? const FavoritesPage()
+                  : NotificationsPage(isAdmin: isAdmin),
           bottomNavigationBar: ValueListenableBuilder<int>(
             valueListenable: Notifications.unseen,
             builder: (context, unseen, _) => AppBottomBar(
@@ -1497,26 +1507,30 @@ class _HomePageState extends State<HomePage> {
               onTap: (i) => _onNavTap(i, isAdmin),
             ),
           ),
-          floatingActionButton: FloatingActionButton(
-            backgroundColor: AppConfig.primary,
-            foregroundColor: Colors.white,
-            elevation: 3,
-            tooltip: isAdmin ? 'خبر جديد' : 'دخول الإدارة',
-            onPressed: () async {
-              if (isAdmin) {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ComposePage()),
-                );
-              } else {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AdminLoginPage()),
-                );
-              }
-            },
-            child: Icon(isAdmin ? Icons.edit_rounded : Icons.login_rounded),
-          ),
+          floatingActionButton: showHome && _navIndex == 0
+              ? FloatingActionButton(
+                  backgroundColor: AppConfig.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 3,
+                  tooltip: isAdmin ? 'خبر جديد' : 'دخول الإدارة',
+                  onPressed: () async {
+                    if (isAdmin) {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ComposePage()),
+                      );
+                    } else {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const AdminLoginPage()),
+                      );
+                    }
+                  },
+                  child:
+                      Icon(isAdmin ? Icons.edit_rounded : Icons.login_rounded),
+                )
+              : null,
           floatingActionButtonLocation:
               FloatingActionButtonLocation.centerDocked,
         );
@@ -1538,18 +1552,8 @@ class _HomePageState extends State<HomePage> {
         }
         return; // يبقى مؤشر الرئيسية هو المختار افتراضياً
       case 1:
-        await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const FavoritesPage()),
-        );
-        break;
       case 2:
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => NotificationsPage(isAdmin: isAdmin)),
-        );
-        break;
+        return;
       case 3:
         await _openAccountSheet(isAdmin);
         break;
