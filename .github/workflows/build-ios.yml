@@ -33,6 +33,28 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # يسرّع pod install كثيراً — يعيد استخدام Pods المُنزَّلة سابقاً
+      # ما دام Podfile.lock لم يتغيّر (أي لم تُضف/تُحذف حزمة Flutter)
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+
+      # يسرّع خطوة تجميع Xcode (linking/indexing) عبر إعادة استخدام
+      # نتائج البناء السابقة لنفس الملفات
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: derived-data-${{ runner.os }}-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            derived-data-${{ runner.os }}-
+
       # ملف Firebase لنظام iOS غير مرفوع للمستودع (محمي في .gitignore).
       # إن أضفته لاحقاً كسر (secret) بصيغة base64 فعّل الخطوة التالية:
       # - name: Restore GoogleService-Info.plist
