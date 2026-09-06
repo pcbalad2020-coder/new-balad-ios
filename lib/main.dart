@@ -48,6 +48,7 @@ Future<void> main() async {
     FirebaseMessaging.onBackgroundMessage(_backgroundMessageHandler);
   }
   await Notifications.init();
+  await Blocked.load();
   runApp(const NewsApp());
 }
 
@@ -386,6 +387,69 @@ class Api {
   }
 
   // ---------- حساب الزائر ----------
+
+  // ---------- الإبلاغ ----------
+
+  static Future<void> reportContent({
+    required String type, // post | comment
+    required String postId,
+    String commentId = '',
+    String reportedUid = '',
+    String reportedName = '',
+    String snippet = '',
+    required String reason,
+  }) async {
+    await ensureSignedIn();
+    await db.collection(AppConfig.reportsCollection).add({
+      'type': type,
+      'postId': postId,
+      'commentId': commentId,
+      'reportedUid': reportedUid,
+      'reportedName': reportedName,
+      'snippet': snippet.length > 200 ? snippet.substring(0, 200) : snippet,
+      'reason': reason,
+      'reporterUid': auth.currentUser!.uid,
+      'status': 'open',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Stream<QuerySnapshot<Map<String, dynamic>>> reportsStream() {
+    return db
+        .collection(AppConfig.reportsCollection)
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots();
+  }
+
+  // ---------- حذف الحساب ----------
+
+  /// يحذف تعليقات المستخدم ثم حسابه نهائياً (متطلب Google Play).
+  static Future<void> deleteAccount() async {
+    final user = auth.currentUser;
+    if (user == null) return;
+    final uid = user.uid;
+
+    try {
+      final snap = await db
+          .collectionGroup(AppConfig.commentsSubcollection)
+          .where('uid', isEqualTo: uid)
+          .limit(300)
+          .get();
+      for (final doc in snap.docs) {
+        final postRef = doc.reference.parent.parent;
+        if (postRef != null) {
+          await deleteComment(postRef.id, doc.id);
+        }
+      }
+    } catch (_) {
+      // لا نمنع حذف الحساب إن تعذّر حذف التعليقات
+    }
+
+    await user.delete();
+    Secrets.clear();
+    await ensureSignedIn();
+  }
 
   static Future<void> setDisplayName(String name) async {
     await ensureSignedIn();
@@ -789,6 +853,47 @@ class Notifications {
     appNavigatorKey.currentState?.push(
       MaterialPageRoute(builder: (_) => PostPage(postId: postId)),
     );
+  }
+}
+
+// ===========================================================================
+//  حظر المستخدمين — يُحفظ على الجهاز، ويخفي تعليقات من حظرهم المستخدم
+// ===========================================================================
+
+class Blocked {
+  Blocked._();
+
+  static const String _key = 'blocked_users';
+  static Map<String, String> _users = {}; // uid -> الاسم
+
+  static Map<String, String> get all => Map.unmodifiable(_users);
+  static bool has(String uid) => _users.containsKey(uid);
+
+  static Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_key);
+      if (raw == null || raw.isEmpty) return;
+      _users = Map<String, String>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      _users = {};
+    }
+  }
+
+  static Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, jsonEncode(_users));
+  }
+
+  static Future<void> block(String uid, String name) async {
+    if (uid.isEmpty) return;
+    _users[uid] = name;
+    await _save();
+  }
+
+  static Future<void> unblock(String uid) async {
+    _users.remove(uid);
+    await _save();
   }
 }
 
@@ -1516,6 +1621,56 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _confirmDeleteAccount() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف الحساب'),
+        content: const Text(
+          'سيُحذف حسابك وتعليقاتك نهائياً، ولا يمكن التراجع.\n'
+          'يمكنك التصفح بعدها كزائر.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('تراجع')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف نهائياً',
+                style: TextStyle(color: AppConfig.danger)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await Api.deleteAccount();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('حُذف حسابك')),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      if (e.code == 'requires-recent-login') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('لأمانك، سجّل الدخول من جديد ثم أعد المحاولة'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        await Api.signOut();
+        if (mounted) setState(() {});
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذّر حذف الحساب. حاول لاحقاً')),
+        );
+      }
+    }
+  }
+
   Future<void> _openAccountSheet(bool isAdmin) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1635,6 +1790,31 @@ class _HomePageState extends State<HomePage> {
                   if (mounted) setState(() {});
                 },
               ),
+            if (isAdmin)
+              ListTile(
+                leading: const Icon(Icons.flag_rounded),
+                title: const Text('البلاغات الواردة'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ReportsPage()),
+                  );
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.block_rounded),
+              title: const Text('المستخدمون المحظورون'),
+              subtitle: Text('${Blocked.all.length}'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BlockedPage()),
+                );
+                if (mounted) setState(() {});
+              },
+            ),
             StatefulBuilder(
               builder: (context, setSheetState) => SwitchListTile(
                 secondary: const Icon(Icons.notifications_active_rounded),
@@ -1647,21 +1827,66 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             ListTile(
+              leading: const Icon(Icons.privacy_tip_outlined),
+              title: const Text('سياسة الخصوصية'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                launchUrl(Uri.parse(AppConfig.privacyPolicyUrl),
+                    mode: LaunchMode.externalApplication);
+              },
+            ),
+            if (!Api.isGuest)
+              ListTile(
+                leading: const Icon(Icons.person_remove_rounded,
+                    color: AppConfig.danger),
+                title: const Text('حذف حسابي نهائياً',
+                    style: TextStyle(color: AppConfig.danger)),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await _confirmDeleteAccount();
+                },
+              ),
+            ListTile(
               leading: const Icon(Icons.info_outline_rounded),
               title: const Text('عن التطبيق'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                showAboutDialog(
+                showDialog<void>(
                   context: context,
-                  applicationName: AppConfig.appName,
-                  applicationVersion: '1.0.0',
-                  applicationIcon: const AppLogo(size: 46),
-                  children: [
-                    Text(
-                        'تطبيق أخبار منطقة ${AppConfig.regionName}. النشر من الإدارة، والتفاعل للجميع.'),
-                    const SizedBox(height: 8),
-                    const Text('تطوير: ${AppConfig.developer}'),
-                  ],
+                  builder: (ctx) => AlertDialog(
+                    icon: const AppLogo(size: 52),
+                    title: const Text(AppConfig.appName,
+                        textAlign: TextAlign.center),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'تطبيق أخبار منطقة ${AppConfig.regionName}. '
+                          'النشر من الإدارة، والتفاعل للجميع.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(height: 1.7),
+                        ),
+                        const SizedBox(height: 14),
+                        const Text(
+                          'الإصدار 1.0.0',
+                          style: TextStyle(
+                              fontSize: 12.5, color: AppConfig.textSoft),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'تطوير ${AppConfig.developer}',
+                          style: TextStyle(
+                              fontSize: 12.5, color: AppConfig.textSoft),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('إغلاق'),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
@@ -2257,11 +2482,17 @@ class _PostVideoState extends State<PostVideo> {
     final c = _controller;
     final ready = c != null && c.value.isInitialized;
 
+    final targetRatio =
+        ready ? clampRatio(c.value.aspectRatio) : clampRatio(widget.ratio);
+
     return GestureDetector(
       onTap: _onTap,
-      child: AspectRatio(
-        aspectRatio:
-            ready ? clampRatio(c.value.aspectRatio) : clampRatio(widget.ratio),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: targetRatio, end: targetRatio),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
+        builder: (context, ratio, child) =>
+            AspectRatio(aspectRatio: ratio, child: child),
         child: Stack(
           fit: StackFit.expand,
           alignment: Alignment.center,
@@ -2508,6 +2739,34 @@ class _PostPageState extends State<PostPage> {
     super.dispose();
   }
 
+  Future<void> _reportComment(
+      String commentId, String uid, String name, String text) async {
+    final reason = await showReasonSheet(context);
+    if (reason == null) return;
+    try {
+      await Api.reportContent(
+        type: 'comment',
+        postId: widget.postId,
+        commentId: commentId,
+        reportedUid: uid,
+        reportedName: name,
+        snippet: text,
+        reason: reason,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('وصلنا بلاغك، وسيراجعه فريق الإدارة')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذّر إرسال البلاغ')),
+        );
+      }
+    }
+  }
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
@@ -2600,23 +2859,58 @@ class _PostPageState extends State<PostPage> {
                             ),
                           );
                         }
+                        final visible = docs
+                            .where((d) =>
+                                !Blocked.has((d.data()['uid'] ?? '') as String))
+                            .toList();
+
+                        if (visible.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Center(
+                              child: Text('التعليقات المعروضة مخفية بالحظر',
+                                  style: TextStyle(color: AppConfig.textSoft)),
+                            ),
+                          );
+                        }
+
                         return Column(
-                          children: docs.map((d) {
+                          children: visible.map((d) {
                             final data = d.data();
-                            final mine = data['uid'] == Api.uid;
+                            final uid = (data['uid'] ?? '') as String;
+                            final name = (data['name'] ?? 'زائر') as String;
+                            final text = (data['text'] ?? '') as String;
+                            final mine = uid == Api.uid;
                             return Center(
                               child: ConstrainedBox(
                                 constraints:
                                     const BoxConstraints(maxWidth: 680),
                                 child: _CommentTile(
-                                  name: (data['name'] ?? 'زائر') as String,
+                                  uid: uid,
+                                  name: name,
                                   photo: (data['photo'] ?? '') as String,
-                                  text: (data['text'] ?? '') as String,
+                                  text: text,
                                   date: (data['createdAt'] as Timestamp?)
                                       ?.toDate(),
                                   canDelete: mine || widget.isAdmin,
+                                  isMine: mine,
                                   onDelete: () =>
                                       Api.deleteComment(widget.postId, d.id),
+                                  onReport: () =>
+                                      _reportComment(d.id, uid, name, text),
+                                  onBlock: () async {
+                                    await Blocked.block(uid, name);
+                                    if (mounted) {
+                                      setState(() {});
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                              'حُظر $name — لن ترى تعليقاته'),
+                                        ),
+                                      );
+                                    }
+                                  },
                                 ),
                               ),
                             );
@@ -2686,20 +2980,28 @@ class _PostPageState extends State<PostPage> {
 }
 
 class _CommentTile extends StatelessWidget {
+  final String uid;
   final String name;
   final String photo;
   final String text;
   final DateTime? date;
   final bool canDelete;
+  final bool isMine;
   final VoidCallback onDelete;
+  final VoidCallback onReport;
+  final VoidCallback onBlock;
 
   const _CommentTile({
+    required this.uid,
     required this.name,
     required this.photo,
     required this.text,
     required this.date,
     required this.canDelete,
+    required this.isMine,
     required this.onDelete,
+    required this.onReport,
+    required this.onBlock,
   });
 
   @override
@@ -2726,7 +3028,7 @@ class _CommentTile extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+              padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
               decoration: BoxDecoration(
                 color: AppConfig.surface,
                 borderRadius: BorderRadius.circular(14),
@@ -2739,26 +3041,78 @@ class _CommentTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(name,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                                 fontWeight: FontWeight.w800, fontSize: 13.5)),
                       ),
                       Text(timeAgo(date),
                           style: const TextStyle(
                               fontSize: 11, color: AppConfig.textSoft)),
-                      if (canDelete)
-                        InkWell(
-                          onTap: onDelete,
-                          child: const Padding(
-                            padding: EdgeInsets.only(right: 8),
-                            child: Icon(Icons.delete_outline_rounded,
-                                size: 17, color: AppConfig.textSoft),
-                          ),
+                      SizedBox(
+                        width: 34,
+                        height: 30,
+                        child: PopupMenuButton<String>(
+                          padding: EdgeInsets.zero,
+                          icon: const Icon(Icons.more_horiz_rounded,
+                              size: 18, color: AppConfig.textSoft),
+                          onSelected: (value) {
+                            switch (value) {
+                              case 'report':
+                                onReport();
+                              case 'block':
+                                onBlock();
+                              case 'delete':
+                                onDelete();
+                            }
+                          },
+                          itemBuilder: (_) => [
+                            if (!isMine)
+                              const PopupMenuItem(
+                                value: 'report',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.flag_outlined, size: 18),
+                                    SizedBox(width: 10),
+                                    Text('إبلاغ عن التعليق'),
+                                  ],
+                                ),
+                              ),
+                            if (!isMine)
+                              const PopupMenuItem(
+                                value: 'block',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.block_rounded, size: 18),
+                                    SizedBox(width: 10),
+                                    Text('حظر هذا المستخدم'),
+                                  ],
+                                ),
+                              ),
+                            if (canDelete)
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete_outline_rounded,
+                                        size: 18, color: AppConfig.danger),
+                                    SizedBox(width: 10),
+                                    Text('حذف التعليق',
+                                        style:
+                                            TextStyle(color: AppConfig.danger)),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(text,
-                      style: const TextStyle(fontSize: 14.5, height: 1.6)),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Text(text,
+                        style: const TextStyle(fontSize: 14.5, height: 1.6)),
+                  ),
                 ],
               ),
             ),
@@ -2767,6 +3121,41 @@ class _CommentTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// نافذة اختيار سبب الإبلاغ.
+Future<String?> showReasonSheet(BuildContext context) {
+  return showModalBottomSheet<String>(
+    context: context,
+    backgroundColor: AppConfig.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+    ),
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 16),
+          const Text('سبب الإبلاغ',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          const SizedBox(height: 6),
+          const Text('يراجع فريق الإدارة كل بلاغ',
+              style: TextStyle(fontSize: 12.5, color: AppConfig.textSoft)),
+          const SizedBox(height: 10),
+          const Divider(),
+          ...AppConfig.reportReasons.map(
+            (r) => ListTile(
+              title: Text(r, style: const TextStyle(fontSize: 14.5)),
+              trailing: const Icon(Icons.chevron_left_rounded,
+                  color: AppConfig.textSoft),
+              onTap: () => Navigator.pop(ctx, r),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+      ),
+    ),
+  );
 }
 
 // ===========================================================================
@@ -2844,9 +3233,15 @@ class _ComposePageState extends State<ComposePage> {
         );
         if (info?.path != null) {
           file = XFile(info!.path!);
-          final w = info.width ?? 0;
-          final h = info.height ?? 0;
-          if (w > 0 && h > 0) _videoRatio = w / h;
+          final w = (info.width ?? 0).toDouble();
+          final h = (info.height ?? 0).toDouble();
+          final rotation = info.orientation ?? 0;
+          if (w > 0 && h > 0) {
+            // المقاطع العمودية تُسجَّل أفقياً مع علامة دوران،
+            // فنقلب الأبعاد لتظهر البطاقة بمقاسها الحقيقي
+            final rotated = rotation == 90 || rotation == 270;
+            _videoRatio = rotated ? h / w : w / h;
+          }
         }
       } catch (_) {
         // نكمل بالملف الأصلي إن فشل التحويل
@@ -3460,6 +3855,201 @@ class _NotificationsPageState extends State<NotificationsPage> {
           );
         },
       ),
+    );
+  }
+}
+
+// ===========================================================================
+//  البلاغات (للأدمن) والمحظورون
+// ===========================================================================
+
+class ReportsPage extends StatelessWidget {
+  const ReportsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('البلاغات الواردة')),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Api.reportsStream(),
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                    'تعذّر تحميل البلاغات. تأكد من نشر قواعد Firestore.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppConfig.textSoft)),
+              ),
+            );
+          }
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final docs = snap.data!.docs;
+          if (docs.isEmpty) {
+            return const Center(
+              child: Text('لا توجد بلاغات',
+                  style: TextStyle(color: AppConfig.textSoft)),
+            );
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: docs.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, i) {
+              final d = docs[i];
+              final data = d.data();
+              final postId = (data['postId'] ?? '') as String;
+              final commentId = (data['commentId'] ?? '') as String;
+              final snippet = (data['snippet'] ?? '') as String;
+
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: AppConfig.danger.withAlpha(30),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                (data['reason'] ?? '') as String,
+                                style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppConfig.danger),
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              timeAgo(
+                                  (data['createdAt'] as Timestamp?)?.toDate()),
+                              style: const TextStyle(
+                                  fontSize: 11.5, color: AppConfig.textSoft),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'من: ${data['reportedName'] ?? 'غير معروف'}',
+                          style: const TextStyle(
+                              fontSize: 12.5, color: AppConfig.textSoft),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(snippet.isEmpty ? '(بلا نص)' : snippet,
+                            style: const TextStyle(fontSize: 14, height: 1.6)),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            TextButton.icon(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      PostPage(postId: postId, isAdmin: true),
+                                ),
+                              ),
+                              icon: const Icon(Icons.open_in_new_rounded,
+                                  size: 17),
+                              label: const Text('فتح الخبر'),
+                            ),
+                            if (commentId.isNotEmpty)
+                              TextButton.icon(
+                                onPressed: () async {
+                                  await Api.deleteComment(postId, commentId);
+                                  await d.reference.delete();
+                                },
+                                icon: const Icon(Icons.delete_outline_rounded,
+                                    size: 17, color: AppConfig.danger),
+                                label: const Text('حذف التعليق',
+                                    style: TextStyle(color: AppConfig.danger)),
+                              ),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () => d.reference.delete(),
+                              child: const Text('تجاهل'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class BlockedPage extends StatefulWidget {
+  const BlockedPage({super.key});
+
+  @override
+  State<BlockedPage> createState() => _BlockedPageState();
+}
+
+class _BlockedPageState extends State<BlockedPage> {
+  @override
+  Widget build(BuildContext context) {
+    final users = Blocked.all.entries.toList();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('المستخدمون المحظورون')),
+      body: users.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(30),
+                child: Text(
+                  'لم تحظر أحداً.\nيمكنك حظر أي شخص من قائمة تعليقه.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppConfig.textSoft, height: 1.8),
+                ),
+              ),
+            )
+          : ListView.separated(
+              itemCount: users.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, i) => Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: AppConfig.primarySoft,
+                      child: Text(
+                        users[i].value.trim().isEmpty
+                            ? '؟'
+                            : users[i].value.trim().substring(0, 1),
+                        style: const TextStyle(
+                            color: AppConfig.primaryDark,
+                            fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    title: Text(users[i].value),
+                    trailing: TextButton(
+                      onPressed: () async {
+                        await Blocked.unblock(users[i].key);
+                        if (mounted) setState(() {});
+                      },
+                      child: const Text('إلغاء الحظر'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
     );
   }
 }

@@ -89,7 +89,23 @@ class AppConfig {
   static const String newsTopic = 'news';
   static const String notificationChannelId = 'news_channel';
 
+  // ===== متطلبات المتاجر =====
+  /// روابط إلزامية لقبول التطبيق على Google Play
+  static const String privacyPolicyUrl = 'https://ضع_رابط_سياسة_الخصوصية';
+  static const String deleteAccountUrl = 'https://ضع_رابط_صفحة_حذف_الحساب';
+  static const String supportEmail = 'ضع_بريد_الدعم@مثال.com';
+
+  /// أسباب الإبلاغ المعروضة للمستخدم
+  static const List<String> reportReasons = <String>[
+    'محتوى مسيء أو بذيء',
+    'إساءة أو تنمّر',
+    'معلومات كاذبة',
+    'محتوى مكرر أو دعائي',
+    'سبب آخر',
+  ];
+
   // ===== أسماء المجموعات في Firestore =====
+  static const String reportsCollection = 'reports';
   static const String postsCollection = 'posts';
   static const String adminsCollection = 'admins';
   static const String likesSubcollection = 'likes';
