@@ -1395,6 +1395,7 @@ class _HomePageState extends State<HomePage> {
   int _limit = AppConfig.pageSize;
   String _search = '';
   bool _searching = false;
+  int _navIndex = 0;
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
 
@@ -1472,57 +1473,6 @@ class _HomePageState extends State<HomePage> {
                   _searchController.clear();
                 }),
               ),
-              ValueListenableBuilder<int>(
-                valueListenable: Notifications.unseen,
-                builder: (context, count, _) => Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    IconButton(
-                      tooltip: 'الإشعارات',
-                      icon: const Icon(Icons.notifications_none_rounded),
-                      onPressed: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => NotificationsPage(isAdmin: isAdmin),
-                          ),
-                        );
-                        if (mounted) setState(() {});
-                      },
-                    ),
-                    if (count > 0)
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppConfig.danger,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          constraints: const BoxConstraints(minWidth: 17),
-                          child: Text(
-                            count > 9 ? '+9' : '$count',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: isAdmin ? 'لوحة الإدارة' : 'حسابي',
-                icon: Icon(isAdmin
-                    ? Icons.admin_panel_settings_rounded
-                    : Icons.person_rounded),
-                onPressed: () => _openAccountSheet(isAdmin),
-              ),
               const SizedBox(width: 4),
             ],
             bottom: _searching
@@ -1538,23 +1488,84 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
           ),
-          floatingActionButton: isAdmin
-              ? FloatingActionButton.extended(
-                  backgroundColor: AppConfig.primary,
-                  foregroundColor: Colors.white,
-                  icon: const Icon(Icons.edit_rounded),
-                  label: const Text('خبر جديد',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const ComposePage()),
-                  ),
-                )
-              : null,
           body: _buildFeed(isAdmin),
+          bottomNavigationBar: SafeArea(
+            top: false,
+            minimum: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: ValueListenableBuilder<int>(
+              valueListenable: Notifications.unseen,
+              builder: (context, unseen, _) => LiquidBottomNav(
+                currentIndex: _navIndex,
+                items: [
+                  const NavItem(Icons.home_rounded, 'الرئيسية'),
+                  const NavItem(Icons.favorite_rounded, 'المفضّلة'),
+                  NavItem(
+                    isAdmin ? Icons.edit_rounded : Icons.login_rounded,
+                    isAdmin ? 'خبر جديد' : 'الإدارة',
+                  ),
+                  NavItem(
+                    isAdmin
+                        ? Icons.admin_panel_settings_rounded
+                        : Icons.person_rounded,
+                    isAdmin ? 'الإدارة' : 'حسابي',
+                  ),
+                  const NavItem(Icons.notifications_rounded, 'التنبيهات'),
+                ],
+                badges: {4: unseen},
+                onTap: (i) => _onNavTap(i, isAdmin),
+              ),
+            ),
+          ),
         );
       },
     );
+  }
+
+  Future<void> _onNavTap(int index, bool isAdmin) async {
+    setState(() => _navIndex = index);
+
+    switch (index) {
+      case 0:
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOut,
+          );
+        }
+        return; // يبقى مؤشر الرئيسية هو المختار افتراضياً
+      case 1:
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const FavoritesPage()),
+        );
+        break;
+      case 2:
+        if (isAdmin) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ComposePage()),
+          );
+        } else {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminLoginPage()),
+          );
+        }
+        break;
+      case 3:
+        await _openAccountSheet(isAdmin);
+        break;
+      case 4:
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => NotificationsPage(isAdmin: isAdmin)),
+        );
+        break;
+    }
+
+    if (mounted) setState(() => _navIndex = 0);
   }
 
   Widget _buildFeed(bool isAdmin) {
@@ -1802,19 +1813,20 @@ class _HomePageState extends State<HomePage> {
                   );
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.block_rounded),
-              title: const Text('المستخدمون المحظورون'),
-              subtitle: Text('${Blocked.all.length}'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const BlockedPage()),
-                );
-                if (mounted) setState(() {});
-              },
-            ),
+            if (isAdmin)
+              ListTile(
+                leading: const Icon(Icons.block_rounded),
+                title: const Text('المستخدمون المحظورون'),
+                subtitle: Text('${Blocked.all.length}'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const BlockedPage()),
+                  );
+                  if (mounted) setState(() {});
+                },
+              ),
             StatefulBuilder(
               builder: (context, setSheetState) => SwitchListTile(
                 secondary: const Icon(Icons.notifications_active_rounded),
@@ -4050,6 +4062,327 @@ class _BlockedPageState extends State<BlockedPage> {
                 ),
               ),
             ),
+    );
+  }
+}
+
+// ===========================================================================
+//  شريط تنقّل سفلي بتأثير "الفقاعة السائلة" — الأيقونة تنبثق من الشريط
+//  وتطفو فوقه عند الضغط، مع رابط سائل يصلها بالشريط.
+// ===========================================================================
+
+class NavItem {
+  final IconData icon;
+  final String label;
+  const NavItem(this.icon, this.label);
+}
+
+class LiquidBottomNav extends StatefulWidget {
+  final List<NavItem> items;
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  final Map<int, int> badges;
+
+  const LiquidBottomNav({
+    super.key,
+    required this.items,
+    required this.currentIndex,
+    required this.onTap,
+    this.badges = const {},
+  });
+
+  @override
+  State<LiquidBottomNav> createState() => _LiquidBottomNavState();
+}
+
+class _LiquidBottomNavState extends State<LiquidBottomNav>
+    with SingleTickerProviderStateMixin {
+  static const double barHeight = 62;
+  static const double bubbleSize = 50;
+  static const double popHeight = 46;
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  )..value = 1;
+
+  late final Animation<double> _t =
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+
+  @override
+  void didUpdateWidget(covariant LiquidBottomNav oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentIndex != widget.currentIndex) {
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.items.length;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final barWidth = constraints.maxWidth;
+        final slot = barWidth / count;
+        final selX = (widget.currentIndex + 0.5) * slot;
+
+        return AnimatedBuilder(
+          animation: _t,
+          builder: (context, _) {
+            final p = _t.value; // 0 = مستقر داخل الشريط، 1 = طافٍ بالأعلى
+            return SizedBox(
+              height: barHeight + popHeight + 4,
+              width: barWidth,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.bottomCenter,
+                children: [
+                  // الشريط نفسه
+                  Positioned(
+                    bottom: 0,
+                    child: Container(
+                      width: barWidth,
+                      height: barHeight,
+                      decoration: BoxDecoration(
+                        color: AppConfig.surface,
+                        borderRadius: BorderRadius.circular(barHeight / 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withAlpha(20),
+                            blurRadius: 22,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: List.generate(count, (i) {
+                          final item = widget.items[i];
+                          final selected = i == widget.currentIndex;
+                          // الأيقونة المختارة تختفي من الشريط بعد أن "تطير" للأعلى
+                          final iconOpacity =
+                              selected ? (1 - (p / 0.35)).clamp(0.0, 1.0) : 1.0;
+                          final badge = widget.badges[i] ?? 0;
+
+                          return Expanded(
+                            child: InkWell(
+                              onTap: () => widget.onTap(i),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Opacity(
+                                    opacity: iconOpacity,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Icon(item.icon,
+                                            size: 22,
+                                            color: AppConfig.textSoft),
+                                        if (badge > 0)
+                                          Positioned(
+                                            top: -4,
+                                            left: -6,
+                                            child: Container(
+                                              width: 8,
+                                              height: 8,
+                                              decoration: const BoxDecoration(
+                                                color: AppConfig.danger,
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 200),
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: selected
+                                          ? FontWeight.w800
+                                          : FontWeight.w500,
+                                      color: selected
+                                          ? AppConfig.primary
+                                          : AppConfig.textSoft,
+                                    ),
+                                    child: Text(item.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
+
+                  // الرابط السائل بين الشريط والفقاعة الطافية
+                  if (p > 0.03)
+                    Positioned(
+                      bottom: barHeight - 14,
+                      left: selX - bubbleSize / 2 - 6,
+                      child: CustomPaint(
+                        size: Size(bubbleSize + 12, 14 + p * popHeight),
+                        painter: _BlobConnectorPainter(
+                          progress: p,
+                          color: AppConfig.primary,
+                        ),
+                      ),
+                    ),
+
+                  // الفقاعة الطافية بأيقونة العنصر المختار
+                  if (p > 0.15)
+                    Positioned(
+                      bottom: barHeight - 14 + p * popHeight - bubbleSize / 2,
+                      left: selX - bubbleSize / 2,
+                      child: Transform.scale(
+                        scale: ((p - 0.15) / 0.85).clamp(0.0, 1.0),
+                        child: Container(
+                          width: bubbleSize,
+                          height: bubbleSize,
+                          decoration: BoxDecoration(
+                            color: AppConfig.primary,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppConfig.primary.withAlpha(90),
+                                blurRadius: 16,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            widget.items[widget.currentIndex].icon,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// يرسم "عنقاً" سائلاً يصل الفقاعة الطافية بالشريط، فيبدو الشكل ذائباً
+/// من نقطة واحدة بدل عنصرين منفصلين.
+class _BlobConnectorPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  const _BlobConnectorPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress < 0.03) return;
+    final paint = Paint()..color = color;
+    final w = size.width;
+    final h = size.height;
+    // العنق يبدأ عريضاً كامتداد من الشريط، ثم يضيق كلما ابتعدت الفقاعة
+    final neckWidth = (1 - progress) * w * 0.75 + 10;
+    final path = Path()
+      ..moveTo(w / 2 - neckWidth / 2, h)
+      ..quadraticBezierTo(w / 2 - neckWidth / 2, h * 0.25, w / 2 - 7, 0)
+      ..lineTo(w / 2 + 7, 0)
+      ..quadraticBezierTo(
+          w / 2 + neckWidth / 2, h * 0.25, w / 2 + neckWidth / 2, h)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BlobConnectorPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
+}
+
+// ===========================================================================
+//  المفضّلة — الأخبار التي أعجب بها المستخدم الحالي
+// ===========================================================================
+
+class FavoritesPage extends StatelessWidget {
+  const FavoritesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('المفضّلة')),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Api.db
+            .collectionGroup(AppConfig.likesSubcollection)
+            .where('uid', isEqualTo: Api.uid)
+            .snapshots(),
+        builder: (context, likesSnap) {
+          if (likesSnap.hasError) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'تعذّر تحميل المفضّلة. إن ظهر هذا أول مرة، افتح رسالة الخطأ '
+                  'في وحدة التحكم واضغط رابط إنشاء الفهرس، ثم أعد المحاولة.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppConfig.textSoft),
+                ),
+              ),
+            );
+          }
+          if (!likesSnap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final postIds = likesSnap.data!.docs
+              .map((d) => d.reference.parent.parent?.id)
+              .whereType<String>()
+              .toSet()
+              .toList();
+
+          if (postIds.isEmpty) {
+            return const Center(
+              child: Text('لم تُعجب بأي خبر بعد',
+                  style: TextStyle(color: AppConfig.textSoft)),
+            );
+          }
+
+          // حد Firestore: 30 قيمة كحد أقصى لكل استعلام whereIn
+          final chunk = postIds.take(30).toList();
+
+          return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            future: Api.posts.where(FieldPath.documentId, whereIn: chunk).get(),
+            builder: (context, postsSnap) {
+              if (!postsSnap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final posts = postsSnap.data!.docs.map(Post.fromDoc).toList()
+                ..sort((a, b) => (b.createdAt ?? DateTime(1970))
+                    .compareTo(a.createdAt ?? DateTime(1970)));
+
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+                itemCount: posts.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, i) => Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: PostCard(post: posts[i], isAdmin: false),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
